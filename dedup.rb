@@ -1,9 +1,8 @@
 require 'find'
-require './subprocess.rb'
 require 'mimemagic'
-require 'mime/types'
 require 'digest/md5'
 require 'set'
+require 'childprocess'
 require 'fileutils'
 include FileUtils
 
@@ -12,7 +11,7 @@ START_TIME = "00:01:00"
 #SEARCH_DIR = File.expand_path("/Volumes/Store/duptest")
 #SEARCH_DIR = File.expand_path("/Volumes/Storage/Downloads/asd")
 SEARCH_DIR = File.expand_path("/Volumes/Data/Backups/asd")
-TMP_DIR = File.expand_path("/Volumes/Store/tmp")
+TMP_DIR = File.expand_path("/Volumes/Storage/tmp")
 
 # Create directories if they don't exist
 mkdir SEARCH_DIR if ! File.directory?(SEARCH_DIR)
@@ -20,11 +19,13 @@ mkdir TMP_DIR if ! File.directory?(TMP_DIR)
 
 # Helper to run command silently and raise exception if didn't run correctly
 def quietrun(cmd)
-    s = Subprocess.new(*cmd, { :stdout => "/dev/null", :stderr => "/dev/null" })
-    exit_code = s.poll_for_exit(300)
-    if exit_code != 0
-      raise "!!! FATAL: Command exit with code: %s (%s)" % [ exit_code, cmd ] 
+    process = ChildProcess.build(*cmd)
+    process.start
+    begin
+      process.poll_for_exit(60)
+    rescue ChildProcess::TimeoutError
     end
+    return process.exit_code
 end
 
 md5_hash = {}
@@ -32,19 +33,22 @@ dup_hash = {}
 
 Dir.chdir(TMP_DIR) do
   Find.find(SEARCH_DIR) do |filename|
-    
+
     # Skip if not a file or not video
     next if ! File.file?(filename)
     filemime = MimeMagic.by_path(filename)
     next if ! filemime || ! filemime.video?
     puts "*** Analysing: %s" % filename
-    
+
     # Get some frames with mplayer
     print "\tMplayer "
-    quietrun(['mplayer', '-nosound', '-vo', 'jpeg', '-ss', START_TIME, 
-              '-frames', TEST_FRAMES.to_s, filename])
-       
-    # Sanity check       
+    if quietrun(['mplayer', '-nosound', '-vo', 'jpeg', '-ss', START_TIME,
+              '-frames', TEST_FRAMES.to_s, filename]) != 0
+      print "...failed, skipping...\n"
+      next
+    end
+
+    # Sanity check
     if %x(ls *.jpg).split("\n").length < 1
       puts "\n\tUnable to create images, skipping..."
       next
@@ -54,7 +58,7 @@ Dir.chdir(TMP_DIR) do
     print "|| ImageMagick "
     quietrun(['mogrify', '-resize', '16x16!', '-threshold', '50%',
               '-format', 'bmp', '*.jpg'])
-              
+
     # Create MD5Sum for each image file
     print "|| MD5Sums\n"
     %x(ls *.bmp | sort -n).split("\n").each do |tmpimg|
@@ -68,10 +72,10 @@ Dir.chdir(TMP_DIR) do
         dup_hash[key] += 1
       end
     end
-    
+
     # Delete the images created by mogrify and mplayer
     rm(%x(ls *.bmp *.jpg).split("\n"))
-    
+
   end
 end
 
