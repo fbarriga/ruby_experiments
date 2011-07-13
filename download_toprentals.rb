@@ -10,8 +10,8 @@ def get_toprentals()
     url_path = "/api/public/v1.0/lists/dvds/top_rentals.json"
 
     url = "%s%s?apikey=%s" % [base_url, url_path, api_key]
-    #top_rentals = open(url).read
-    top_rentals = open('top_rentals.json').read
+    top_rentals = open(url).read
+    # DEBUG top_rentals = open('top_rentals.json').read
     decoded_rentals = ActiveSupport::JSON.decode(top_rentals)
 
     decoded_rentals['movies'].each do |movie|
@@ -25,11 +25,11 @@ def search_btjunkie(search_term)
     # o=52 -- sort by number of seeders
     url = "http://btjunkie.org/rss.xml?q=%s&o=52" % query
     results = open(url).read
-    # results = open('btjunkie.xml').read
+    # DEBUG results = open('btjunkie.xml').read
     Feedzirra::Feed.parse(results).entries.each do |entry|
       d = {}
       d['entry_url'] = entry.entry_id
-      d['torrent_url'] = entry.url
+      d['torrent_url'] = "%s/download.torrent" % entry.url
       d['published'] = Time.parse(entry.published)
       # Split "long title name  [number_of_seeds/number_of_leaches]"
       full_title, d['title'], d['seeds'], d['leaches'] = \
@@ -53,19 +53,33 @@ end
 dfn = File.expand_path('~/.downloaded_movies')
 store = File.file?(dfn) ? DBM.open(dfn) : DBM.new(dfn)
 
+# Get top rentals
 get_toprentals do |movie_string|
+
+  # Check we haven't already downloaded this movie
   if store.has_key?(movie_string)
     puts "Already downloaded: %s" % movie_string
     next
   end
+
+  # Search for movie on btjunkie
   p "Searching: %s" % movie_string
   search_btjunkie(movie_string) do |result|
+    # Sanity checks and we want highdef baby :)
     if result['seeds'] > 10 and \
       ( result['title'].downcase.match('720p') or \
         result['title'].downcase.match('1080p') )
-      store[movie_string] = 1
-      p result
-      break
+
+      # Download the torrent
+      puts "Downloading: %s" % result['title']
+      outpath = File.expand_path("~/Downloads/%s.torrent" % movie_string)
+      p = Process.spawn("wget '%s' -O '%s'" % [ result['torrent_url'], outpath ])
+      Process.waitpid(p);
+      if $?.exitstatus == 0
+        store[movie_string] = 1
+        break
+      end
+
     end
   end
 end
