@@ -5,7 +5,7 @@ require 'feedzirra'
 require 'dbm'
 
 def get_toprentals()
-    api_key="xbc8uer4d3rdfafxyrppjmpw"
+    api_key="xxxxxxxxxx"
     base_url = "http://api.rottentomatoes.com"
     url_path = "/api/public/v1.0/lists/dvds/top_rentals.json"
 
