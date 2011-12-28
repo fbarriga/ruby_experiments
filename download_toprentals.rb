@@ -5,11 +5,12 @@ require 'feedzirra'
 require 'dbm'
 
 def get_toprentals()
-    api_key="xxxxxxxxxx"
+    api_key="xbc8uer4d3rdfafxyrppjmpw"
     base_url = "http://api.rottentomatoes.com"
     url_path = "/api/public/v1.0/lists/dvds/top_rentals.json"
+    #url_path = "/api/public/v1.0/lists/dvds/new_releases.json"
 
-    url = "%s%s?apikey=%s" % [base_url, url_path, api_key]
+    url = "%s%s?limit=50&apikey=%s" % [base_url, url_path, api_key]
     top_rentals = open(url).read
     # DEBUG top_rentals = open('top_rentals.json').read
     decoded_rentals = ActiveSupport::JSON.decode(top_rentals)
@@ -24,7 +25,13 @@ def search_btjunkie(search_term)
     query = CGI.escape(search_term)
     # o=52 -- sort by number of seeders
     url = "http://btjunkie.org/rss.xml?q=%s&o=52" % query
-    results = open(url).read
+    begin
+      results = open(url).read
+    rescue Timeout::Error
+      puts "Timed out..."
+    rescue Errno::ECONNREFUSED
+      puts "Connection refused..."
+    end
     # DEBUG results = open('btjunkie.xml').read
     Feedzirra::Feed.parse(results).entries.each do |entry|
       d = {}
@@ -43,7 +50,7 @@ def search_btjunkie(search_term)
         d[key] = val
       end
       # Some sanity!
-      matches = search_term.split.select { |w| d['title'].downcase.match(w.downcase) }
+      matches = search_term.split.select { |w| d['title'].downcase.include?(w.downcase) if d['title'] }
       if matches.length == search_term.split.length
           yield d
       end
@@ -56,9 +63,14 @@ store = File.file?(dfn) ? DBM.open(dfn) : DBM.new(dfn)
 # Get top rentals
 get_toprentals do |movie_string|
 
+  # Cleanup search_term
+  movie_string.sub!(":","")
+  # Remove paranthesis
+  movie_string.sub!(/\([^)]*\)\s/,'')
+
   # Check we haven't already downloaded this movie
   if store.has_key?(movie_string)
-    puts "Already downloaded: %s" % movie_string
+    # puts "Already downloaded: %s" % movie_string
     next
   end
 
@@ -73,8 +85,7 @@ get_toprentals do |movie_string|
       # Download the torrent
       puts "Downloading: %s" % result['title']
       outpath = File.expand_path("~/Downloads/%s.torrent" % movie_string)
-      p = Process.spawn("wget '%s' -O '%s'" % [ result['torrent_url'], outpath ])
-      Process.waitpid(p);
+      p = IO.popen([ 'wget', '-q', result['torrent_url'], '-O', outpath ]); p.read; p.close
       if $?.exitstatus == 0
         store[movie_string] = 1
         break
